@@ -1,0 +1,14 @@
+# dbmate configuration
+# See: https://github.com/amacneil/dbmate
+
+# Database connection URL
+# This will be overridden by DATABASE_URL environment variable if set
+# IMPORTANT: Always use DATABASE_URL from .env file - this is just a fallback
+# Remove or update this value in production
+database_url: "postgresql://scraper:scraper123@localhost:5433/scraper_db?sslmode=disable"
+
+# Migrations directory
+migrations_dir: "./db/migrations"
+
+# Schema file (optional - for dumping schema)
+schema_file: "./db/schema.sql"

@@ -1,0 +1,22 @@
+{
+  "name": "scraper-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-ready Scraper Platform monorepo",
+  "scripts": {
+    "dev:api": "pnpm --filter api dev",
+    "build:api": "pnpm --filter api build",
+    "start:api": "pnpm --filter api start",
+    "migrate": "dbmate up",
+    "migrate:down": "dbmate down",
+    "migrate:rollback": "dbmate rollback",
+    "seed": "pnpm --filter api seed"
+  },
+  "devDependencies": {
+    "dbmate": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
