@@ -26,20 +26,21 @@ export class JobsService {
   /**
    * Create a job and enqueue it to BullMQ
    * Verifies tenant has access to the dataset
+   * @param mode - 'quick_check' (only page 1) or 'full' (all pages until existing article found)
    */
-  async create(tenant: Tenant, datasetId: string): Promise<Job> {
+  async create(tenant: Tenant, datasetId: string, mode?: 'quick_check' | 'full'): Promise<Job> {
     // Verify dataset exists and tenant has access
     const dataset = await this.datasetsService.findOne(datasetId, tenant);
 
     // Create job record
     // Store mode in stats JSONB (mode: 'quick_check' or 'full')
-    const mode = (dto as any).mode || 'full'; // Default to full if not specified
+    const jobMode = mode || 'full'; // Default to full if not specified
     const newJob: NewJob = {
       dataset_id: datasetId,
       tenant_id: tenant.id,
       status: 'QUEUED',
       progress: 0,
-      stats: { mode }, // Store mode in stats
+      stats: { mode: jobMode }, // Store mode in stats
     };
 
     const [job] = await this.db
