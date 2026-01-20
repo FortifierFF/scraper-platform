@@ -97,7 +97,7 @@ class ExampleNewsSpider(scrapy.Spider):
             # This will be picked up by the scheduler to trigger full scrape
             self.logger.info('Quick check found new articles - full scrape should be triggered')
         
-        super().closed(reason)
+        # Don't call super().closed() - it's handled by Scrapy's signal system
     
     def start_requests(self):
         """Generate initial requests from start_urls."""

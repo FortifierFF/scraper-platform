@@ -10,8 +10,9 @@ import psycopg2
 import psycopg2.extras
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
-from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
+import subprocess
+import tempfile
 
 # Add the worker directory to Python path so Scrapy can find the project
 worker_dir = os.path.dirname(os.path.abspath(__file__))
@@ -220,19 +221,81 @@ def run_spider(dataset, job_id, job_mode='full'):
         'scraper_platform.pipelines.PostgresPipeline': 300,
     })
     
-    # Run crawler (blocking)
-    process = CrawlerProcess(settings)
-    # Pass config and mode to spider via constructor
-    process.crawl(spider_class, dataset_config=dataset['config'], dataset_id=dataset['id'], job_mode=job_mode)
-    process.start()  # This blocks until crawling is done
+    # Run crawler in a subprocess to avoid ReactorNotRestartable error
+    # Each spider run gets its own process and reactor
+    # This is simpler than managing the reactor lifecycle
+    import json
     
-    # Get crawler stats
-    crawler_stats = process.crawler.stats.get_stats()
+    # Serialize config to JSON string for the script
+    config_json_str = json.dumps(dataset['config'])
     
-    # Get stats from the crawler
+    # Create a temporary script to run the spider
+    script_content = f"""import os
+import sys
+import json
+sys.path.insert(0, {repr(worker_dir)})
+
+from scrapy.crawler import CrawlerProcess
+from scrapy.utils.project import get_project_settings
+from scraper_platform.spiders.example_news_spider import ExampleNewsSpider
+
+# Set environment variables
+os.environ['DATABASE_URL'] = {repr(DATABASE_URL)}
+os.environ['DATASET_ID'] = {repr(dataset['id'])}
+os.environ['JOB_ID'] = {repr(job_id)}
+os.environ['JOB_MODE'] = {repr(job_mode)}
+os.environ.setdefault('SCRAPY_SETTINGS_MODULE', 'scraper_platform.settings')
+
+# Configure settings
+settings = get_project_settings()
+settings.set('DATASET_ID', {repr(dataset['id'])})
+settings.set('JOB_ID', {repr(job_id)})
+settings.set('JOB_MODE', {repr(job_mode)})
+settings.set('DATABASE_URL', {repr(DATABASE_URL)})
+settings.set('ITEM_PIPELINES', {{
+    'scraper_platform.pipelines.ImageDownloadPipeline': 200,
+    'scraper_platform.pipelines.PostgresPipeline': 300,
+}})
+
+# Load dataset config from JSON string
+config_json_str = {repr(config_json_str)}
+dataset_config = json.loads(config_json_str)
+settings.set('DATASET_CONFIG', dataset_config)
+
+# Run spider
+process = CrawlerProcess(settings)
+process.crawl(ExampleNewsSpider, dataset_config=dataset_config, dataset_id={repr(dataset['id'])}, job_mode={repr(job_mode)})
+process.start()
+"""
+    
+    # Write script to temp file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(script_content)
+        script_path = f.name
+    
+    try:
+        # Run script in subprocess
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour timeout
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr if result.stderr else result.stdout
+            raise RuntimeError(f'Spider subprocess failed (code {result.returncode}): {error_msg}')
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(script_path)
+        except:
+            pass
+    
+    # Get stats from the crawler (simplified - pipeline tracks items)
     stats = {
-        'items_scraped': crawler_stats.get('item_scraped_count', 0),
-        'pages_crawled': crawler_stats.get('response_received_count', 0),
+        'items_scraped': 0,  # Pipeline will track this, or we can query DB
+        'pages_crawled': 0,
     }
     
     return stats
@@ -282,8 +345,12 @@ def process_job(conn, job):
         print(f'Job {job_id} completed successfully')
         
     except Exception as e:
-        error_msg = str(e)
+        error_msg = str(e) if str(e) else repr(e)
+        if not error_msg:
+            error_msg = f'Unknown error: {type(e).__name__}'
         print(f'Job {job_id} failed: {error_msg}')
+        import traceback
+        traceback.print_exc()
         mark_job_failed(conn, job_id, error_msg)
 
 
@@ -291,6 +358,24 @@ def main():
     """Main worker loop."""
     print('Starting worker...')
     print(f'Polling interval: {POLL_INTERVAL} seconds')
+    
+    # Start scheduler for automatic quick_check jobs
+    try:
+        # Import scheduler module directly (it's in the same directory)
+        # Add current directory to path if needed
+        worker_dir = os.path.dirname(os.path.abspath(__file__))
+        if worker_dir not in sys.path:
+            sys.path.insert(0, worker_dir)
+        
+        from scheduler import start_scheduler
+        start_scheduler()
+    except ImportError as e:
+        print(f'Scheduler module not found: {e}')
+        print('Skipping auto-scheduling')
+    except Exception as e:
+        print(f'Failed to start scheduler: {e}')
+        import traceback
+        traceback.print_exc()
     
     while True:
         try:

@@ -11,6 +11,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise ValueError('DATABASE_URL environment variable is required')
+
+# Scheduler is enabled by default, can be disabled with SCHEDULER_ENABLED=false
 SCHEDULER_ENABLED = os.getenv('SCHEDULER_ENABLED', 'true').lower() == 'true'
 QUICK_CHECK_INTERVAL = int(os.getenv('QUICK_CHECK_INTERVAL', '600'))  # Default: 10 minutes (600 seconds)
 
